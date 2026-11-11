@@ -48,8 +48,8 @@ select is(
 -- ---------- grants: anon/authenticated sem acesso ----------
 select is(
   (select count(*)::int from information_schema.role_table_grants
-    where table_schema = 'public' and grantee in ('anon','authenticated')),
-  0, 'anon/authenticated sem grants em tabelas de public');
+    where table_schema = 'public' and grantee = 'anon'),
+  0, 'anon sem grants em tabelas de public (authenticated: ver 020_rls)');
 
 create table public._tmp_grants (id int);
 create function public._tmp_fn() returns int language sql as 'select 1';
