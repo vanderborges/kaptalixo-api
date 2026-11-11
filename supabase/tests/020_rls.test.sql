@@ -1,7 +1,7 @@
 -- T1.2: RLS, grants por coluna, views seguras e helpers. Usuarios simulados com
 -- set local role + request.jwt.claims. Fixtures criadas como postgres dentro da transacao.
 begin;
-select plan(146);
+select plan(178);
 
 -- ---------- estrutura (como postgres) ----------
 select is(
@@ -45,7 +45,15 @@ select hasnt_column('public', 'v_solicitacao_gerador', 'telefone', 'v_solicitaca
 -- funcoes: execute explicito e search_path
 select ok(has_function_privilege('authenticated', 'public.papel_atual()', 'execute'), 'authenticated executa papel_atual()');
 select ok(not has_function_privilege('anon', 'public.papel_atual()', 'execute'), 'anon nao executa papel_atual()');
-select ok(not has_function_privilege('authenticated', 'public.tg_catador_protege_status()', 'execute'), 'funcao de trigger nao executavel por authenticated');
+select ok(not has_function_privilege('authenticated', 'public.tg_catador_protege()', 'execute'), 'funcao de trigger nao executavel por authenticated');
+select ok(not has_function_privilege('authenticated', 'public.tg_ponto_protege()', 'execute'), 'funcao de trigger de ponto nao executavel por authenticated');
+select ok(not has_column_privilege('authenticated', 'public.ofertas', 'distancia_m', 'select'), 'authenticated sem SELECT em ofertas.distancia_m (exata)');
+select ok(not has_column_privilege('authenticated', 'public.ofertas', 'eta_s', 'select'), 'authenticated sem SELECT em ofertas.eta_s (exato)');
+select ok(not has_column_privilege('authenticated', 'public.pontos_coleta', 'id', 'update'), 'ponto: id nao atualizavel');
+select is(
+  (select count(*)::int from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'v'
+      and coalesce(array_to_string(c.reloptions, ','), '') not like '%security_barrier=true%'),
+  0, 'todas as views de public com security_barrier');
 select is(
   (select count(*)::int from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosecdef
       and not coalesce(p.proconfig::text, '') like '%search_path=%'),
@@ -86,10 +94,10 @@ insert into solicitacoes (id, gerador_id, endereco_id, localizacao, endereco_tex
    'SRID=4326;POINT(-46.61 -23.53)'::geography, 'Rua do G3, 30', 1, 'P', null, 'aceita', '3333', '00000000-0000-0000-0000-00000000c001');
 insert into solicitacao_materiais values
   ('00000000-0000-0000-0000-000000005001', 1), ('00000000-0000-0000-0000-000000005002', 1), ('00000000-0000-0000-0000-000000005002', 2);
-insert into ofertas (id, solicitacao_id, catador_id, ordem, status, expira_em) values
-  ('00000000-0000-0000-0000-00000000f001', '00000000-0000-0000-0000-000000005001', '00000000-0000-0000-0000-00000000c001', 1, 'aceita', now()),
-  ('00000000-0000-0000-0000-00000000f002', '00000000-0000-0000-0000-000000005002', '00000000-0000-0000-0000-00000000c001', 1, 'recusada', now()),
-  ('00000000-0000-0000-0000-00000000f003', '00000000-0000-0000-0000-000000005002', '00000000-0000-0000-0000-00000000c002', 2, 'pendente', now() + interval '45 seconds');
+insert into ofertas (id, solicitacao_id, catador_id, ordem, status, expira_em, distancia_m, eta_s) values
+  ('00000000-0000-0000-0000-00000000f001', '00000000-0000-0000-0000-000000005001', '00000000-0000-0000-0000-00000000c001', 1, 'aceita', now(), 500, 120),
+  ('00000000-0000-0000-0000-00000000f002', '00000000-0000-0000-0000-000000005002', '00000000-0000-0000-0000-00000000c001', 1, 'recusada', now(), 900, 200),
+  ('00000000-0000-0000-0000-00000000f003', '00000000-0000-0000-0000-000000005002', '00000000-0000-0000-0000-00000000c002', 2, 'pendente', now() + interval '45 seconds', 1234, 200);
 insert into rotas (id, catador_id, ponto_destino_id, polyline) values
   ('00000000-0000-0000-0000-000000008001', '00000000-0000-0000-0000-00000000c001', '00000000-0000-0000-0000-000000007001', 'SECRETPOLY');
 insert into rota_paradas (id, rota_id, ordem, tipo, solicitacao_id, ponto_id, localizacao) values
@@ -105,8 +113,10 @@ insert into avaliacoes (solicitacao_id, avaliador_id, avaliado_id, nota) values
 insert into notificacoes (id, perfil_id, tipo, titulo) values
   ('00000000-0000-0000-0000-00000000d001', '00000000-0000-0000-0000-00000000a001', 't', 'N G1'),
   ('00000000-0000-0000-0000-00000000d002', '00000000-0000-0000-0000-00000000a002', 't', 'N G2');
-insert into localizacoes_catador (catador_id, localizacao) values
-  ('00000000-0000-0000-0000-00000000c001', 'SRID=4326;POINT(-46.64 -23.56)'::geography);
+-- rastro do C1: ponto atual, e ponto antigo exatamente na casa do G3 (outra coleta, antes do aceite da S1)
+insert into localizacoes_catador (catador_id, localizacao, registrada_em) values
+  ('00000000-0000-0000-0000-00000000c001', 'SRID=4326;POINT(-46.64 -23.56)'::geography, now()),
+  ('00000000-0000-0000-0000-00000000c001', 'SRID=4326;POINT(-46.61 -23.53)'::geography, now() - interval '3 days');
 
 -- helpers de teste: trocar de usuario e contar linhas afetadas por um comando
 create function public._as(p uuid) returns void language plpgsql as $$
@@ -155,7 +165,10 @@ select throws_ok($$select polyline from rotas$$, '42501', null, 'G1 nao le a pol
 select is((select count(*)::int from rota_paradas), 1, 'G1 ve so a parada da propria solicitacao');
 select is((select count(*)::int from entregas), 0, 'G1 nao le entregas');
 select is((select count(*)::int from avaliacoes), 1, 'G1 ve a avaliacao que fez');
-select is((select count(*)::int from localizacoes_catador), 1, 'G1 ve o rastro do catador que o atende');
+select is((select count(*)::int from localizacoes_catador), 0, 'G1 nao le o historico de posicoes (nem o atual, nem o antigo na casa do G3)');
+select is((select count(*)::int from localizacoes_catador
+            where extensions.st_dwithin(localizacao, 'SRID=4326;POINT(-46.61 -23.53)'::geography, 30)), 0,
+  'G1 nao localiza a casa do G3 pelo rastro do catador');
 select is((select count(*)::int from notificacoes), 1, 'G1 ve so as proprias notificacoes');
 select is(public._rows($$update notificacoes set lida = true where id = '00000000-0000-0000-0000-00000000d001'$$), 1, 'G1 marca a propria notificacao como lida');
 select is(public._rows($$update notificacoes set lida = true where id = '00000000-0000-0000-0000-00000000d002'$$), 0, 'G1 nao marca notificacao do G2');
@@ -166,6 +179,15 @@ select is(public._rows($$update parametros set valor = '1'::jsonb where chave = 
 select throws_ok($$insert into materiais (id, codigo, nome, categoria) values (9, 'x', 'X', 'x')$$, '42501', null, 'G1 nao cria materiais');
 select throws_ok($$insert into ponto_precos (ponto_id, material_id, preco_kg) values ('00000000-0000-0000-0000-000000007001', 2, 1)$$,
   '42501', null, 'G1 nao cadastra preco em ponto');
+
+-- G1 com a coleta 'coletada': a posicao ao vivo do catador some
+reset role;
+update solicitacoes set status = 'coletada' where id = '00000000-0000-0000-0000-000000005001';
+select public._as('00000000-0000-0000-0000-00000000a001');
+select ok((select catador_lat is null and catador_lng is null from v_solicitacao_gerador), 'G1 nao ve a posicao do catador apos coletada');
+select is((select count(*)::int from localizacoes_catador), 0, 'G1 segue sem ler o rastro apos coletada');
+reset role;
+update solicitacoes set status = 'aceita' where id = '00000000-0000-0000-0000-000000005001';
 
 -- ================= CATADOR 2 (so oferta pendente da S2) =================
 reset role;
@@ -179,6 +201,10 @@ select is((select materiais from v_oferta_resumo), array[1,2]::smallint[], 'resu
 select is((select bairro from v_oferta_resumo), 'Vila Nova', 'resumo mostra bairro');
 select is((select aprox_lat from v_oferta_resumo)::numeric, -23.55, 'resumo traz localizacao aproximada (grade ~1 km), nao a exata');
 select ok((select aprox_lng <> -46.6334 from v_oferta_resumo), 'aprox_lng difere da longitude exata');
+select is((select distancia_m from v_oferta_resumo), 1200, 'resumo arredonda distancia_m a 100 m');
+select is((select eta_s from v_oferta_resumo), 180, 'resumo arredonda eta_s a 60 s');
+select throws_ok($$select distancia_m from ofertas$$, '42501', null, 'C2 nao le distancia_m exata na tabela ofertas');
+select is((select count(*)::int from enderecos), 0, 'C2 (oferta pendente) nao le enderecos');
 select is((select count(*)::int from v_solicitacao_catador), 0, 'C2 nao tem solicitacao atribuida');
 select is((select count(*)::int from ofertas), 1, 'C2 ve so a propria oferta');
 select throws_ok($$update ofertas set status = 'aceita'$$, '42501', null, 'C2 nao aceita oferta direto (RPC)');
@@ -199,6 +225,17 @@ select is(public._rows($$update catadores set tipo_veiculo = 'moto 2' where perf
 select is(public._rows($$update catadores set tipo_veiculo = 'hack' where perfil_id = '00000000-0000-0000-0000-00000000c001'$$), 0, 'C2 nao edita catador alheio');
 select is((select count(*)::int from localizacoes_catador), 0, 'C2 nao ve rastro de outro catador');
 select is((select count(*)::int from avaliacoes), 0, 'C2 nao ve avaliacoes alheias');
+select throws_ok($$update catadores set documento = '999' where perfil_id = '00000000-0000-0000-0000-00000000c002'$$,
+  'P0001', 'cadastro aprovado: alteracao somente por admin', 'catador aprovado nao troca documento');
+select throws_ok($$update catadores set razao_social = 'Outra' where perfil_id = '00000000-0000-0000-0000-00000000c002'$$,
+  'P0001', 'cadastro aprovado: alteracao somente por admin', 'catador aprovado nao troca razao_social');
+select throws_ok($$update catadores set tipo = 'empresa' where perfil_id = '00000000-0000-0000-0000-00000000c002'$$,
+  'P0001', 'cadastro aprovado: alteracao somente por admin', 'catador aprovado nao troca tipo');
+-- oferta vencida (ainda 'pendente') some do resumo
+reset role;
+update ofertas set expira_em = now() - interval '1 second' where id = '00000000-0000-0000-0000-00000000f003';
+select public._as('00000000-0000-0000-0000-00000000c002');
+select is((select count(*)::int from v_oferta_resumo), 0, 'oferta pendente vencida nao aparece no resumo');
 
 -- ================= CATADOR 1 (atribuido a S1 e S3) =================
 reset role;
@@ -216,12 +253,36 @@ select is((select count(*)::int from rota_paradas), 3, 'C1 ve todas as paradas d
 select is((select count(*)::int from entregas), 1, 'C1 ve a propria entrega');
 select is((select count(*)::int from entrega_itens), 1, 'C1 ve os itens da propria entrega');
 select is((select count(*)::int from perfis), 1, 'C1 nao le perfis alheios');
+select is((select count(*)::int from ofertas), 2, 'C1 le as proprias ofertas (sem distancia_m)');
+
+-- coleta encerrada: o catador perde endereco, observacao, foto e dados do gerador
+reset role;
+update solicitacoes set status = 'entregue' where id = '00000000-0000-0000-0000-000000005003';
+select public._as('00000000-0000-0000-0000-00000000c001');
+select is((select count(*)::int from solicitacoes), 1, 'C1 nao le na tabela a solicitacao ja entregue');
+select is((select count(*)::int from solicitacoes where id = '00000000-0000-0000-0000-000000005003'), 0, 'C1 sem endereco_texto da S3 entregue (tabela)');
+select ok((select endereco_texto is null and lat is null and lng is null and observacao is null and gerador_nome is null
+             from v_solicitacao_catador where id = '00000000-0000-0000-0000-000000005003'),
+  'view do catador anula endereco, coordenadas, observacao e gerador apos encerrar');
+select is((select status::text from v_solicitacao_catador where id = '00000000-0000-0000-0000-000000005003'), 'entregue', 'view mantem o status do historico');
+reset role;
+update solicitacoes set status = 'cancelada' where id = '00000000-0000-0000-0000-000000005003';
+select public._as('00000000-0000-0000-0000-00000000c001');
+select ok((select endereco_texto is null from v_solicitacao_catador where id = '00000000-0000-0000-0000-000000005003'), 'idem para cancelada');
+
+-- rota encerrada: o catador nao guarda as paradas (enderecos dos geradores)
+reset role;
+update rotas set status = 'concluida' where id = '00000000-0000-0000-0000-000000008001';
+select public._as('00000000-0000-0000-0000-00000000c001');
+select is((select count(*)::int from rota_paradas), 0, 'C1 nao le paradas de rota concluida');
+select is((select count(*)::int from v_rota_catador), 1, 'C1 mantem a rota concluida no historico');
 
 -- ================= CATADOR 3 (pendente) =================
 reset role;
 select public._as('00000000-0000-0000-0000-00000000c003');
 select is((select status_cadastro::text from catadores), 'pendente', 'C3 pendente ve o proprio status');
 select throws_ok($$update catadores set status_cadastro = 'aprovado'$$, 'P0001', 'status_cadastro: somente admin', 'catador pendente nao se auto-aprova');
+select is(public._rows($$update catadores set documento = 'DOC-C3b'$$), 1, 'catador pendente ainda edita o proprio documento');
 select is((select count(*)::int from v_oferta_resumo), 0, 'C3 sem ofertas');
 select throws_ok($$insert into ofertas (solicitacao_id, catador_id, ordem, expira_em)
   values ('00000000-0000-0000-0000-000000005002', '00000000-0000-0000-0000-00000000c003', 9, now())$$, '42501', null, 'C3 nao cria oferta para si');
@@ -231,6 +292,15 @@ reset role;
 select public._as('00000000-0000-0000-0000-00000000b001');
 select is(public._rows($$update pontos_coleta set nome = 'Ponto 1b' where id = '00000000-0000-0000-0000-000000007001'$$), 1, 'operador edita o proprio ponto');
 select is(public._rows($$update pontos_coleta set nome = 'hack' where id = '00000000-0000-0000-0000-000000007002'$$), 0, 'operador nao edita outro ponto');
+select throws_ok($$update pontos_coleta set localizacao = 'SRID=4326;POINT(-46.6 -23.5)'::geography where id = '00000000-0000-0000-0000-000000007001'$$,
+  'P0001', 'ponto: localizacao, ativo e operador somente por admin', 'operador nao move o ponto');
+select throws_ok($$update pontos_coleta set ativo = false where id = '00000000-0000-0000-0000-000000007001'$$,
+  'P0001', 'ponto: localizacao, ativo e operador somente por admin', 'operador nao desativa o ponto');
+select throws_ok($$update pontos_coleta set perfil_id = '00000000-0000-0000-0000-00000000b002' where id = '00000000-0000-0000-0000-000000007001'$$,
+  'P0001', 'ponto: localizacao, ativo e operador somente por admin', 'operador nao troca o operador do ponto');
+select throws_ok($$update pontos_coleta set id = gen_random_uuid() where id = '00000000-0000-0000-0000-000000007001'$$,
+  '42501', null, 'operador nao altera a PK do ponto');
+select is(public._rows($$update pontos_coleta set horario_funcionamento = '{"seg":[["08:00","17:00"]]}'::jsonb where id = '00000000-0000-0000-0000-000000007001'$$), 1, 'operador edita o horario do proprio ponto');
 select lives_ok($$insert into ponto_precos (ponto_id, material_id, preco_kg) values ('00000000-0000-0000-0000-000000007001', 1, 1.5)$$, 'operador cadastra preco no proprio ponto');
 select throws_ok($$insert into ponto_precos (ponto_id, material_id, preco_kg) values ('00000000-0000-0000-0000-000000007002', 1, 9)$$, '42501', null, 'operador nao cadastra preco em outro ponto');
 select is((select count(*)::int from entregas), 1, 'operador ve entrega do seu ponto');
@@ -256,6 +326,8 @@ select is((select count(*)::int from perfis), 9, 'admin le todos os perfis');
 select is(public._rows($$update catadores set status_cadastro = 'aprovado' where perfil_id = '00000000-0000-0000-0000-00000000c003'$$), 1, 'admin aprova catador pendente');
 select is(public._rows($$update parametros set valor = '4'::jsonb where chave = 'pin_max_erros'$$), 1, 'admin altera parametros');
 select lives_ok($$insert into materiais (id, codigo, nome, categoria) values (9, 'x', 'X', 'x')$$, 'admin cria material');
+select is(public._rows($$update pontos_coleta set ativo = false where id = '00000000-0000-0000-0000-000000007002'$$), 1, 'admin desativa ponto');
+select is(public._rows($$update catadores set documento = 'DOC-NOVO' where perfil_id = '00000000-0000-0000-0000-00000000c002'$$), 1, 'admin altera documento de catador aprovado');
 
 -- ================= NOVO USUARIO (cadastro) =================
 reset role;
