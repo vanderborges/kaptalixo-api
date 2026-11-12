@@ -151,3 +151,9 @@ update ponto_precos set preco_kg = 0.70 where ponto_id = pg_temp.uid('f0000000',
 insert into parametros (chave, valor, descricao)
 values ('modo_demo', 'true'::jsonb, 'Habilita resetar_demo')
 on conflict (chave) do update set valor = 'true'::jsonb;
+
+-- ============ ESTADO BASE DA DEMO (T1.5) ============
+-- Usado por resetar_demo() para restaurar situacao/posicao dos catadores.
+insert into demo_estado_catadores (catador_id, situacao, localizacao_atual, localizacao_atualizada_em)
+select perfil_id, situacao, localizacao_atual, localizacao_atualizada_em from catadores
+on conflict (catador_id) do nothing;
