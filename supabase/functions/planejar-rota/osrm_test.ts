@@ -3,17 +3,11 @@ import { ClienteOsrmHttp, interpretarTrip } from "./osrm.ts";
 import { codificarPolyline, lerPonto } from "./geo.ts";
 import { planejar } from "./planejador.ts";
 import { P0, parada, rota } from "./testes_util.ts";
+import {
+  tripNenhumaRota as semRota,
+  tripTresColetas as fixture,
+} from "./fixtures/osrm.ts";
 
-const fixture = JSON.parse(
-  Deno.readTextFileSync(
-    new URL("./fixtures/trip_3_coletas.json", import.meta.url),
-  ),
-);
-const semRota = JSON.parse(
-  Deno.readTextFileSync(
-    new URL("./fixtures/trip_nenhuma_rota.json", import.meta.url),
-  ),
-);
 const coords = [
   P0,
   { lat: -27.55, lng: -48.5 },

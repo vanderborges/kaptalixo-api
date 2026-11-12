@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { falha } from "./erros.ts";
 import { ewkt, lerPonto } from "./geo.ts";
 import type {
   ParadaRota,
@@ -15,10 +16,6 @@ export function criarClienteServico(): SupabaseClient {
   return createClient(url, chave, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-}
-
-function falha(contexto: string, e: { message: string } | null): never {
-  throw new Error(`${contexto}: ${e?.message ?? "erro"}`);
 }
 
 export class RepositorioRotaSupabase implements RepositorioRota {

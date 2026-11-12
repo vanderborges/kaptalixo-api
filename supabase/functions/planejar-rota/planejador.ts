@@ -13,6 +13,8 @@ import {
 export interface OpcoesPlanejador {
   osrm: ClienteOsrm;
   agora?: () => Date;
+  /** Prazo absoluto (performance.now()) para o OSRM; ao estourar, usa o fallback. */
+  prazo?: number;
   /** Velocidade media (m/s) usada so no fallback haversine. */
   velocidadeFallbackMs?: number;
 }
@@ -76,6 +78,21 @@ function tripFallback(
     distancia_total_m: trechos.reduce((s, t) => s + t.distancia_m, 0),
     duracao_total_s: trechos.reduce((s, t) => s + t.duracao_s, 0),
   };
+}
+
+/** Rejeita se a promessa nao resolver dentro do prazo (defesa para qualquer ClienteOsrm). */
+async function comPrazo<T>(p: Promise<T>, ms?: number): Promise<T> {
+  if (ms === undefined) return p;
+  let t: ReturnType<typeof setTimeout> | undefined;
+  const limite = new Promise<never>((_, rej) => {
+    t = setTimeout(() => rej(new Error("orcamento_esgotado")), ms);
+  });
+  try {
+    return await Promise.race([p, limite]);
+  } finally {
+    clearTimeout(t);
+    p.catch(() => {});
+  }
 }
 
 function tripValido(
@@ -191,9 +208,24 @@ export async function planejar(
     const destinoFixo = destino !== null;
     let trip: ResultadoTrip;
     try {
-      trip = await op.osrm.trip(coords, destinoFixo);
+      const restante = op.prazo === undefined
+        ? undefined
+        : op.prazo - performance.now();
+      if (restante !== undefined && restante < 50) {
+        throw new Error("orcamento_esgotado");
+      }
+      trip = await comPrazo(
+        op.osrm.trip(coords, destinoFixo, restante),
+        restante,
+      );
       if (!tripValido(trip, coords.length, destinoFixo)) {
         throw new Error("trip_invalido");
+      }
+      // Garantia "<= FIFO": se a ordem do OSRM for pior que a de chegada (em linha reta),
+      // usa o fallback, que escolhe a menor entre vizinho mais proximo e FIFO.
+      const fifo = coords.map((_, i) => i);
+      if (totalHaversine(coords, trip.ordem) > totalHaversine(coords, fifo)) {
+        throw new Error("pior_que_fifo");
       }
     } catch (_e) {
       origemCalculo = "haversine";

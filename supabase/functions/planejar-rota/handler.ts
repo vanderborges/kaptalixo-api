@@ -5,6 +5,8 @@ export type Chamador = { tipo: "servico" } | { tipo: "usuario"; id: string };
 
 export interface DepsHandler extends OpcoesPlanejador {
   repo: RepositorioRota;
+  /** Orcamento total (ms) do OSRM, compartilhado entre tentativas e replanejamentos. Padrao 2500. */
+  orcamentoMs?: number;
   /** Valida o token Bearer; null = invalido. */
   autenticar(token: string): Promise<Chamador | null>;
 }
@@ -23,6 +25,7 @@ export function criarHandler(
   deps: DepsHandler,
 ): (req: Request) => Promise<Response> {
   return async (req) => {
+    const prazo = performance.now() + (deps.orcamentoMs ?? 2500);
     try {
       if (req.method !== "POST") {
         return json({ erro: "metodo_nao_permitido" }, 405);
@@ -51,7 +54,7 @@ export function criarHandler(
         if (chamador.tipo === "usuario" && rota.catador_id !== chamador.id) {
           return json({ erro: "sem_permissao" }, 403);
         }
-        const plano = await planejar(rota, deps);
+        const plano = await planejar(rota, { ...deps, prazo });
         if (await deps.repo.gravar(rota, plano)) {
           return json({
             rota_id: rota.id,

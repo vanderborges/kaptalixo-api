@@ -70,7 +70,11 @@ export interface ResultadoTrip {
 
 export interface ClienteOsrm {
   /** coords[0] e a origem; se destinoFixo, o ultimo ponto e o destino. */
-  trip(coords: Coord[], destinoFixo: boolean): Promise<ResultadoTrip>;
+  trip(
+    coords: Coord[],
+    destinoFixo: boolean,
+    orcamentoMs?: number,
+  ): Promise<ResultadoTrip>;
 }
 
 export interface RepositorioRota {

@@ -1,6 +1,7 @@
 // Edge Function planejar-rota (UC06). Ver README.md.
+import { igualConstante } from "./auth.ts";
 import { criarHandler } from "./handler.ts";
-import { ClienteOsrmHttp } from "./osrm.ts";
+import { ClienteOsrmHttp, validarBaseUrl } from "./osrm.ts";
 import {
   criarClienteServico,
   RepositorioRotaSupabase,
@@ -21,17 +22,20 @@ function inteiroEnv(
 
 const osrm = new ClienteOsrmHttp({
   // Default documentado (docs/04): servidor demo publico, somente para a POC.
-  baseUrl: Deno.env.get("OSRM_BASE_URL") ?? "https://router.project-osrm.org",
-  timeoutMs: inteiroEnv("OSRM_TIMEOUT_MS", 2000, 200, 4000),
+  baseUrl: validarBaseUrl(
+    Deno.env.get("OSRM_BASE_URL") ?? "https://router.project-osrm.org",
+  ),
+  timeoutMs: inteiroEnv("OSRM_TIMEOUT_MS", 1500, 200, 4000),
   tentativas: 2, // 1 tentativa + 1 retry
 });
 
 Deno.serve(criarHandler({
   osrm,
   velocidadeFallbackMs: inteiroEnv("FALLBACK_VELOCIDADE_MS", 5, 1, 40),
+  orcamentoMs: inteiroEnv("PLANEJAR_ORCAMENTO_MS", 2500, 500, 2800),
   repo: new RepositorioRotaSupabase(db),
   async autenticar(token) {
-    if (token === chaveServico) return { tipo: "servico" };
+    if (await igualConstante(token, chaveServico)) return { tipo: "servico" };
     const { data, error } = await db.auth.getUser(token);
     if (error || !data.user) return null;
     return { tipo: "usuario", id: data.user.id };
