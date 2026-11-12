@@ -71,7 +71,7 @@ insert into perfis (id, papel, nome) values
   ('00000000-0000-0000-0000-0000000000a3', 'ponto',   'Ponto Teste');
 insert into geradores (perfil_id) values ('00000000-0000-0000-0000-0000000000a1');
 insert into catadores (perfil_id) values ('00000000-0000-0000-0000-0000000000a2');
--- material 1 (papel) vem do seed (T1.3); o teste reaproveita.
+insert into materiais (id, codigo, nome, categoria) values (1, 'papel', 'Papel', 'papel') on conflict do nothing;
 insert into pontos_coleta (id, nome, logradouro, cidade, uf, localizacao) values
   ('00000000-0000-0000-0000-0000000000b1', 'Ponto', 'Rua A', 'Sao Paulo', 'SP', 'SRID=4326;POINT(-46.63 -23.55)'::geography);
 
