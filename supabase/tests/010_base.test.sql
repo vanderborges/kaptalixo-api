@@ -48,8 +48,8 @@ select is(
 -- ---------- grants: anon/authenticated sem acesso ----------
 select is(
   (select count(*)::int from information_schema.role_table_grants
-    where table_schema = 'public' and grantee = 'anon'),
-  0, 'anon sem grants em tabelas de public (authenticated: ver 020_rls)');
+    where table_schema = 'public' and grantee in ('anon','authenticated')),
+  0, 'anon/authenticated sem grants em tabelas de public');
 
 create table public._tmp_grants (id int);
 create function public._tmp_fn() returns int language sql as 'select 1';
@@ -71,7 +71,7 @@ insert into perfis (id, papel, nome) values
   ('00000000-0000-0000-0000-0000000000a3', 'ponto',   'Ponto Teste');
 insert into geradores (perfil_id) values ('00000000-0000-0000-0000-0000000000a1');
 insert into catadores (perfil_id) values ('00000000-0000-0000-0000-0000000000a2');
-insert into materiais (id, codigo, nome, categoria) values (1, 'papel', 'Papel', 'papel');
+-- material 1 (papel) vem do seed (T1.3); o teste reaproveita.
 insert into pontos_coleta (id, nome, logradouro, cidade, uf, localizacao) values
   ('00000000-0000-0000-0000-0000000000b1', 'Ponto', 'Rua A', 'Sao Paulo', 'SP', 'SRID=4326;POINT(-46.63 -23.55)'::geography);
 
