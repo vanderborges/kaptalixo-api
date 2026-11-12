@@ -52,12 +52,16 @@ polyline: o app le `v_rota_catador` / `rota_paradas`.
    `destination`.
 2. OSRM
    `GET {OSRM_BASE_URL}/trip/v1/driving/...?source=first[&destination=last]&roundtrip=false&geometries=polyline&overview=full`.
-   Timeout curto (2 s padrao, maximo 4 s), 1 retry.
-3. Resposta invalida, OSRM fora, orcamento estourado ou ordem do OSRM pior que a FIFO (em linha reta): **fallback** vizinho mais proximo
-   (haversine), geometria em linha reta, `origem_calculo='haversine'`. O
-   fallback compara com a ordem de chegada (FIFO) e usa a de menor distancia.
-   Duracao = distancia / `FALLBACK_VELOCIDADE_MS` (padrao 5 m/s, igual a
-   `aceitar_oferta`).
+   **Orcamento total** `PLANEJAR_ORCAMENTO_MS` (2500 ms padrao, maximo 2800),
+   contado do inicio da requisicao e compartilhado entre a tentativa, o 1 retry
+   e um eventual replanejamento por conflito de versao; cada tentativa usa no
+   maximo `min(OSRM_TIMEOUT_MS, restante)`. Estourou: fallback imediato (aceite
+   "< 3 s").
+3. Resposta invalida, OSRM fora, orcamento estourado ou ordem do OSRM pior que a
+   FIFO (em linha reta): **fallback** vizinho mais proximo (haversine),
+   geometria em linha reta, `origem_calculo='haversine'`. O fallback compara com
+   a ordem de chegada (FIFO) e usa a de menor distancia. Duracao = distancia /
+   `FALLBACK_VELOCIDADE_MS` (padrao 5 m/s, igual a `aceitar_oferta`).
 4. Grava `ordem` (continuando depois das paradas `concluida`/`pulada`, que nao
    sao tocadas), `eta` (agora + duracao acumulada de conducao; sem tempo de
    parada), `distancia_trecho_m`, `duracao_trecho_s`, e na rota `polyline`,
@@ -76,19 +80,22 @@ polyline: o app le `v_rota_catador` / `rota_paradas`.
 
 ## Configuracao (ambiente)
 
-| Variavel                                    | Padrao                            | Obs.                            |
-| ------------------------------------------- | --------------------------------- | ------------------------------- |
-| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | injetadas pelo runtime            | obrigatorias                    |
-| `OSRM_BASE_URL`                             | `https://router.project-osrm.org` | servidor demo, so POC (docs/04) |
-| `OSRM_TIMEOUT_MS`                           | `2000`                            | 200 a 4000                      |
-| `FALLBACK_VELOCIDADE_MS`                    | `5`                               | so no fallback                  |
+| Variavel                                    | Padrao                            | Obs.                                                                         |
+| ------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------- |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | injetadas pelo runtime            | obrigatorias                                                                 |
+| `OSRM_BASE_URL`                             | `https://router.project-osrm.org` | so http/https, sem credenciais (validada na partida); demo, so POC (docs/04) |
+| `OSRM_TIMEOUT_MS`                           | `1500`                            | 200 a 4000 por tentativa (limitado pelo orcamento)                           |
+| `PLANEJAR_ORCAMENTO_MS`                     | `2500`                            | 500 a 2800, orcamento total do OSRM                                          |
+| `FALLBACK_VELOCIDADE_MS`                    | `5`                               | so no fallback                                                               |
 
 ## Privacidade (LGPD)
 
-Com o default, as coordenadas das paradas (enderecos de geradores) e a posicao do catador sao enviadas ao
-servidor publico do OSRM, de terceiros. Aceitavel so na POC com dados ficticios; em producao, usar OSRM proprio
-via `OSRM_BASE_URL`. Logs da funcao nunca incluem coordenadas nem a mensagem bruta de erros do PostgREST (so tabela e codigo).
-O token da service role e comparado em tempo constante.
+Com o default, as coordenadas das paradas (enderecos de geradores) e a posicao
+do catador sao enviadas ao servidor publico do OSRM, de terceiros. Aceitavel so
+na POC com dados ficticios; em producao, usar OSRM proprio via `OSRM_BASE_URL`.
+Logs da funcao nunca incluem coordenadas nem a mensagem bruta de erros do
+PostgREST (so tabela e codigo). O token da service role e comparado em tempo
+constante.
 
 ## Limitacoes conhecidas
 
@@ -102,8 +109,8 @@ O token da service role e comparado em tempo constante.
 
 ## Testes
 
-Sem rede e sem leitura de arquivos (OSRM mockado; fixtures como modulo TS em `fixtures/osrm.ts`). Deno nao precisa estar
-instalado; via docker:
+Sem rede e sem leitura de arquivos (OSRM mockado; fixtures como modulo TS em
+`fixtures/osrm.ts`). Deno nao precisa estar instalado; via docker:
 
 ```
 cd repositorios/kaptalixo-api/supabase/functions/planejar-rota
