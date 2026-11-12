@@ -11,4 +11,4 @@ insert into public.parametros (chave, valor, descricao) values
   ('raio_chegada_m',              '80'::jsonb,                     'UC08: raio para marcar chegada (m)'),
   ('intervalo_loc_rota_s',        '5'::jsonb,                      'UC08: intervalo de envio de posicao em rota (s)'),
   ('intervalo_loc_disp_s',        '30'::jsonb,                     'UC14: intervalo de envio de posicao disponivel (s)'),
-  ('modo_demo',                   'true'::jsonb,                   'Habilita resetar_demo');
+  ('modo_demo',                   'false'::jsonb,                  'Habilita resetar_demo (o seed local liga)');

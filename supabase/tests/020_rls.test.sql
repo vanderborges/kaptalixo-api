@@ -78,7 +78,7 @@ insert into catadores (perfil_id, documento, razao_social, status_cadastro, tipo
   ('00000000-0000-0000-0000-00000000c001', 'DOC-C1', 'Razao C1', 'aprovado', 'carrinho', 'SRID=4326;POINT(-46.64 -23.56)'::geography),
   ('00000000-0000-0000-0000-00000000c002', 'DOC-C2', 'Razao C2', 'aprovado', 'moto',     'SRID=4326;POINT(-46.65 -23.57)'::geography),
   ('00000000-0000-0000-0000-00000000c003', 'DOC-C3', null,       'pendente', 'bicicleta', null);
-insert into materiais (id, codigo, nome, categoria) values (1, 'papel', 'Papel', 'papel'), (2, 'pet', 'PET', 'plastico');
+insert into materiais (id, codigo, nome, categoria) values (1, 'papel', 'Papel', 'papel'), (2, 'pet', 'PET', 'plastico') on conflict do nothing;
 insert into pontos_coleta (id, perfil_id, nome, logradouro, cidade, uf, localizacao) values
   ('00000000-0000-0000-0000-000000007001', '00000000-0000-0000-0000-00000000b001', 'Ponto 1', 'Rua A', 'Sao Paulo', 'SP', 'SRID=4326;POINT(-46.63 -23.55)'::geography),
   ('00000000-0000-0000-0000-000000007002', '00000000-0000-0000-0000-00000000b002', 'Ponto 2', 'Rua B', 'Sao Paulo', 'SP', 'SRID=4326;POINT(-46.62 -23.54)'::geography);
@@ -321,8 +321,8 @@ reset role;
 select public._as('00000000-0000-0000-0000-00000000ad00');
 select is((select count(*)::int from solicitacoes), 3, 'admin le todas as solicitacoes');
 select throws_ok($$select pin_coleta from solicitacoes$$, '42501', null, 'nem admin le pin_coleta direto');
-select is((select count(*)::int from v_catador_privado), 3, 'admin le todos os catadores com documento pela view privada');
-select is((select count(*)::int from perfis), 9, 'admin le todos os perfis');
+select is((select count(*)::int from v_catador_privado where perfil_id::text like '00000000-0000-0000-0000-%'), 3, 'admin le todos os catadores com documento pela view privada');
+select is((select count(*)::int from perfis where id::text like '00000000-0000-0000-0000-%'), 9, 'admin le todos os perfis');
 select is(public._rows($$update catadores set status_cadastro = 'aprovado' where perfil_id = '00000000-0000-0000-0000-00000000c003'$$), 1, 'admin aprova catador pendente');
 select is(public._rows($$update parametros set valor = '4'::jsonb where chave = 'pin_max_erros'$$), 1, 'admin altera parametros');
 select lives_ok($$insert into materiais (id, codigo, nome, categoria) values (9, 'x', 'X', 'x')$$, 'admin cria material');
