@@ -236,7 +236,7 @@ begin
   select coalesce(max(ordem), 0) + 1 into v_ordem from public.rota_paradas where rota_id = v_rota;
   insert into public.rota_paradas (rota_id, ordem, tipo, solicitacao_id, localizacao)
   values (v_rota, v_ordem, 'coleta', s.id, s.localizacao);
-  -- A ordem/ETA/polyline vem da edge function planejar-rota (T1.5), que le rotas.versao.
+  -- A ordem/ETA/polyline vem da edge function planejar-rota (T4.2), que le rotas.versao; nada e enfileirado.
 
   insert into public.notificacoes (perfil_id, tipo, titulo, corpo, dados)
   values (s.gerador_id, 'oferta_aceita', 'Catador a caminho', 'Um catador aceitou sua coleta.',
