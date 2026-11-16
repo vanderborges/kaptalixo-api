@@ -4,6 +4,7 @@ import { codificarPolyline, lerPonto } from "./geo.ts";
 import { planejar } from "./planejador.ts";
 import { P0, parada, rota } from "./testes_util.ts";
 import {
+  tableTresDestinos,
   tripNenhumaRota as semRota,
   tripTresColetas as fixture,
 } from "./fixtures/osrm.ts";
@@ -133,4 +134,54 @@ Deno.test("polyline: codificacao conhecida e leitura de geography", () => {
     lat: -27.5,
   });
   assertEquals(lerPonto(null), null);
+});
+
+Deno.test("table: monta URL (sources=0, annotations=distance) e interpreta distancias", async () => {
+  let url = "";
+  const c = new ClienteOsrmHttp({
+    baseUrl: "http://osrm.local:5000",
+    timeoutMs: 1000,
+    tentativas: 2,
+    fetchFn: (u) => {
+      url = String(u);
+      return Promise.resolve(respostaJson({
+        code: "Ok",
+        distances: tableTresDestinos.distances.map((l) => l.slice(1)),
+      }));
+    },
+  });
+  const d = await c.distancias!(P0, coords.slice(1));
+  assert(
+    url.startsWith("http://osrm.local:5000/table/v1/driving/-48.55,-27.59;"),
+  );
+  assert(url.includes("sources=0"));
+  assert(url.includes("destinations=1;2;3"));
+  assert(url.includes("annotations=distance"));
+  assertEquals(d, [1843, 2651, 5120]);
+});
+
+Deno.test("table: resposta invalida, null (sem rota) ou HTTP 500 viram erro (1 retry)", async () => {
+  let chamadas = 0;
+  const mk = (corpo: unknown, status = 200) =>
+    new ClienteOsrmHttp({
+      baseUrl: "http://osrm.local:5000",
+      timeoutMs: 1000,
+      tentativas: 2,
+      fetchFn: () => {
+        chamadas++;
+        return Promise.resolve(respostaJson(corpo, status));
+      },
+    });
+  await assertRejects(() =>
+    mk({ code: "Ok", distances: [[null, 5]] }).distancias!(
+      P0,
+      coords.slice(1, 3),
+    )
+  );
+  await assertRejects(() =>
+    mk({ code: "Ok", distances: [[1]] }).distancias!(P0, coords.slice(1, 3))
+  );
+  chamadas = 0;
+  await assertRejects(() => mk({}, 500).distancias!(P0, coords.slice(1, 3)));
+  assertEquals(chamadas, 2);
 });

@@ -22,6 +22,32 @@ export interface ParadaRota {
   coord: Coord;
 }
 
+/** Intervalos de funcionamento por dia: {"seg":[["08:00","17:00"]],...}; dia ausente = fechado. */
+export type Horario = Record<string, [string, string][]>;
+
+export interface PontoCandidato {
+  id: string;
+  coord: Coord;
+  horario: Horario;
+  /** preco_kg por material_id (so materiais que o ponto compra). */
+  precos: Record<number, number>;
+}
+
+/** Dados do UC07/RN06: so carregados quando a rota ainda nao tem ponto_destino_id. */
+export interface ContextoDescarte {
+  /** parametros.custo_km_reais (RN06). */
+  custo_km: number;
+  /** Uma entrada por solicitacao da rota (nao pulada): peso (RN07) e materiais declarados. */
+  coletas: { peso_kg: number; materiais: number[] }[];
+  /** Pontos ativos. */
+  pontos: PontoCandidato[];
+}
+
+export interface AlternativaPonto {
+  ponto_id: string;
+  score: number;
+}
+
 export interface RotaCarregada {
   id: string;
   catador_id: string;
@@ -33,6 +59,8 @@ export interface RotaCarregada {
   /** Ponto de descarte D (UC07/T4.3), se ja escolhido. */
   destino: { ponto_id: string; coord: Coord } | null;
   paradas: ParadaRota[];
+  /** Presente so quando ponto_destino_id e null e ha coletas (T4.3). */
+  contexto_descarte?: ContextoDescarte | null;
 }
 
 export type OrigemCalculo = "osrm" | "haversine";
@@ -55,6 +83,9 @@ export interface Plano {
   duracao_total_s: number;
   polyline: string;
   paradas: PlanoParada[];
+  /** Definidos so quando a funcao escolheu o ponto agora (UC07); gravados em rotas. */
+  ponto_destino_id?: string;
+  alternativas_ponto?: AlternativaPonto[];
 }
 
 /** Resultado normalizado do OSRM `trip`. */
@@ -75,6 +106,12 @@ export interface ClienteOsrm {
     destinoFixo: boolean,
     orcamentoMs?: number,
   ): Promise<ResultadoTrip>;
+  /** OSRM `table`: distancia (m) por estrada de `origem` a cada destino (UC07). Opcional. */
+  distancias?(
+    origem: Coord,
+    destinos: Coord[],
+    orcamentoMs?: number,
+  ): Promise<number[]>;
 }
 
 export interface RepositorioRota {

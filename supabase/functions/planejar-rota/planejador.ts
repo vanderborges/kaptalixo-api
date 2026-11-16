@@ -1,4 +1,5 @@
 import { codificarPolyline, haversineM } from "./geo.ts";
+import { candidatosAbertos, Escolha, pontuar } from "./escolha_ponto.ts";
 import {
   ClienteOsrm,
   Coord,
@@ -135,7 +136,7 @@ export async function planejar(
     p.tipo === "descarte" && !finalizadas.includes(p)
   );
 
-  const destino = rota.destino
+  let destino = rota.destino
     ? {
       id: descarteExistente?.id ?? null,
       ponto_id: rota.destino.ponto_id,
@@ -186,7 +187,12 @@ export async function planejar(
   let duracaoTotal = 0;
   let acumulado = 0;
 
-  const alvos = [
+  const alvos: {
+    id: string | null;
+    tipo: "coleta" | "descarte";
+    ponto_id: string | null;
+    coord: Coord;
+  }[] = [
     ...pendentes.map((p) => ({
       id: p.id as string | null,
       tipo: p.tipo as "coleta" | "descarte",
@@ -203,18 +209,20 @@ export async function planejar(
       : []),
   ];
 
-  if (alvos.length > 0 && origem) {
-    const coords = [origem, ...alvos.map((a) => a.coord)];
-    const destinoFixo = destino !== null;
-    let trip: ResultadoTrip;
+  const restanteMs = () =>
+    op.prazo === undefined ? undefined : op.prazo - performance.now();
+
+  /** OSRM trip com validacao; qualquer problema vira fallback haversine (sinalizado). */
+  async function calcularTrip(
+    coords: Coord[],
+    destinoFixo: boolean,
+  ): Promise<{ trip: ResultadoTrip; fallback: boolean }> {
     try {
-      const restante = op.prazo === undefined
-        ? undefined
-        : op.prazo - performance.now();
+      const restante = restanteMs();
       if (restante !== undefined && restante < 50) {
         throw new Error("orcamento_esgotado");
       }
-      trip = await comPrazo(
+      const trip = await comPrazo(
         op.osrm.trip(coords, destinoFixo, restante),
         restante,
       );
@@ -227,10 +235,86 @@ export async function planejar(
       if (totalHaversine(coords, trip.ordem) > totalHaversine(coords, fifo)) {
         throw new Error("pior_que_fifo");
       }
+      return { trip, fallback: false };
     } catch (_e) {
-      origemCalculo = "haversine";
-      trip = tripFallback(coords, destinoFixo, velocidade);
+      return {
+        trip: tripFallback(coords, destinoFixo, velocidade),
+        fallback: true,
+      };
     }
+  }
+
+  // UC07: sem ponto de destino ainda -> escolhe pelo score (RN06) a partir da ultima coleta.
+  let escolhido: Escolha | null = null;
+  const ctx = rota.contexto_descarte;
+  if (!destino && ctx && origem && (alvos.length > 0 || travadas.length > 0)) {
+    let ultima = origem;
+    let etaUltima = agora;
+    if (alvos.length > 0) {
+      const previa = await calcularTrip(
+        [origem, ...alvos.map((a) => a.coord)],
+        false,
+      );
+      if (previa.fallback) origemCalculo = "haversine";
+      ultima = alvos[previa.trip.ordem[previa.trip.ordem.length - 1] - 1].coord;
+      etaUltima = new Date(
+        agora.getTime() + previa.trip.duracao_total_s * 1000,
+      );
+    }
+    const candidatos = candidatosAbertos(
+      ctx.pontos,
+      ultima,
+      etaUltima,
+      velocidade,
+    );
+    if (candidatos.length > 0) {
+      let dist: number[] | null = null;
+      const restante = restanteMs();
+      if (op.osrm.distancias && (restante === undefined || restante >= 50)) {
+        try {
+          dist = await comPrazo(
+            op.osrm.distancias(
+              ultima,
+              candidatos.map((c) => c.coord),
+              restante,
+            ),
+            restante,
+          );
+          if (
+            dist.length !== candidatos.length ||
+            dist.some((d) => !Number.isFinite(d) || d < 0)
+          ) dist = null;
+        } catch (_e) {
+          dist = null;
+        }
+      }
+      if (!dist) {
+        origemCalculo = "haversine";
+        dist = candidatos.map((c) => haversineM(ultima, c.coord));
+      }
+      escolhido = pontuar(ctx, candidatos, dist, etaUltima, velocidade);
+    }
+    if (escolhido) {
+      destino = {
+        id: null,
+        ponto_id: escolhido.ponto.id,
+        coord: escolhido.ponto.coord,
+      };
+      alvos.push({
+        id: null,
+        tipo: "descarte" as const,
+        ponto_id: escolhido.ponto.id,
+        coord: escolhido.ponto.coord,
+      });
+    }
+  }
+
+  if (alvos.length > 0 && origem) {
+    const coords = [origem, ...alvos.map((a) => a.coord)];
+    const destinoFixo = destino !== null;
+    const calc = await calcularTrip(coords, destinoFixo);
+    const trip = calc.trip;
+    if (calc.fallback) origemCalculo = "haversine";
     polyline = trip.polyline;
     distanciaTotal = trip.distancia_total_m;
     duracaoTotal = trip.duracao_total_s;
@@ -257,5 +341,11 @@ export async function planejar(
     duracao_total_s: duracaoTotal,
     polyline,
     paradas: saida,
+    ...(escolhido
+      ? {
+        ponto_destino_id: escolhido.ponto.id,
+        alternativas_ponto: escolhido.alternativas,
+      }
+      : {}),
   };
 }

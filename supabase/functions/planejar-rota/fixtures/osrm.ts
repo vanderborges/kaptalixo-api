@@ -70,3 +70,11 @@ export const tripTresColetas = {
 };
 
 export const tripNenhumaRota = { code: "NoTrips", message: "No trips found" };
+
+/** OSRM `table` (sources=0, annotations=distance) para 3 destinos; gravado a mao no formato real. */
+export const tableTresDestinos = {
+  code: "Ok",
+  distances: [[0, 1843.2, 2650.7, 5120.4]],
+  destinations: [{}, {}, {}, {}],
+  sources: [{}],
+};
