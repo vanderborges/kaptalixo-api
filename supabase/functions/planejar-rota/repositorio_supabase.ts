@@ -2,8 +2,11 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { falha } from "./erros.ts";
 import { ewkt, lerPonto } from "./geo.ts";
 import type {
+  ContextoDescarte,
+  Horario,
   ParadaRota,
   Plano,
+  PontoCandidato,
   RepositorioRota,
   RotaCarregada,
 } from "./tipos.ts";
@@ -60,6 +63,10 @@ export class RepositorioRotaSupabase implements RepositorioRota {
         coord,
       });
     }
+    const temColeta = paradas.some((p) => p.tipo === "coleta");
+    const contexto_descarte = !r.ponto_destino_id && temColeta
+      ? await this.carregarContextoDescarte(paradas)
+      : null;
     return {
       id: r.id,
       catador_id: r.catador_id,
@@ -69,7 +76,85 @@ export class RepositorioRotaSupabase implements RepositorioRota {
       origem: lerPonto(c?.localizacao_atual),
       destino,
       paradas,
+      contexto_descarte,
     };
+  }
+
+  /** Dados do UC07: parametros (RN06/RN07), solicitacoes da rota, pontos ativos e precos. */
+  private async carregarContextoDescarte(
+    paradas: ParadaRota[],
+  ): Promise<ContextoDescarte> {
+    const { data: pars, error: eA } = await this.db.from("parametros")
+      .select("chave,valor").in("chave", ["custo_km_reais", "peso_saco_kg"]);
+    if (eA) falha("parametros", eA);
+    const par = new Map((pars ?? []).map((p) => [p.chave, p.valor]));
+    const custo = Number(par.get("custo_km_reais"));
+    if (!Number.isFinite(custo) || custo < 0) {
+      throw new Error("parametro_custo_km_invalido");
+    }
+    const pesoSaco = (par.get("peso_saco_kg") ?? {}) as Record<string, number>;
+
+    const solIds = [
+      ...new Set(
+        paradas.filter((p) =>
+          p.tipo === "coleta" && p.status !== "pulada" && p.solicitacao_id
+        )
+          .map((p) => p.solicitacao_id as string),
+      ),
+    ];
+    let coletas: ContextoDescarte["coletas"] = [];
+    if (solIds.length > 0) {
+      const { data: ss, error: eS } = await this.db.from("solicitacoes")
+        .select("id,qtd_sacos,tamanho,peso_estimado_kg").in("id", solIds);
+      if (eS) falha("solicitacoes", eS);
+      const { data: ms, error: eM } = await this.db.from(
+        "solicitacao_materiais",
+      )
+        .select("solicitacao_id,material_id").in("solicitacao_id", solIds);
+      if (eM) falha("solicitacao_materiais", eM);
+      const mats = new Map<string, number[]>();
+      for (const m of ms ?? []) {
+        mats.set(m.solicitacao_id, [
+          ...(mats.get(m.solicitacao_id) ?? []),
+          m.material_id,
+        ]);
+      }
+      coletas = (ss ?? []).map((s) => ({
+        // RN07: peso estimado da solicitacao; senao sacos x peso do tamanho.
+        peso_kg: Number(
+          s.peso_estimado_kg ?? s.qtd_sacos * (pesoSaco[s.tamanho] ?? 5),
+        ),
+        materiais: mats.get(s.id) ?? [],
+      }));
+    }
+
+    const { data: pts, error: eP } = await this.db.from("pontos_coleta")
+      .select("id,localizacao,horario_funcionamento").eq("ativo", true);
+    if (eP) falha("pontos_coleta", eP);
+    const ids = (pts ?? []).map((p) => p.id);
+    const precos = new Map<string, Record<number, number>>();
+    if (ids.length > 0) {
+      const { data: pr, error: eR } = await this.db.from("ponto_precos")
+        .select("ponto_id,material_id,preco_kg").in("ponto_id", ids);
+      if (eR) falha("ponto_precos", eR);
+      for (const x of pr ?? []) {
+        const o = precos.get(x.ponto_id) ?? {};
+        o[x.material_id] = Number(x.preco_kg);
+        precos.set(x.ponto_id, o);
+      }
+    }
+    const pontos: PontoCandidato[] = [];
+    for (const p of pts ?? []) {
+      const coord = lerPonto(p.localizacao);
+      if (!coord) continue;
+      pontos.push({
+        id: p.id,
+        coord,
+        horario: (p.horario_funcionamento ?? {}) as Horario,
+        precos: precos.get(p.id) ?? {},
+      });
+    }
+    return { custo_km: custo, coletas, pontos };
   }
 
   /**
@@ -79,6 +164,13 @@ export class RepositorioRotaSupabase implements RepositorioRota {
    */
   async gravar(rota: RotaCarregada, plano: Plano): Promise<boolean> {
     const { data, error } = await this.db.from("rotas").update({
+      // UC07: so presentes quando a funcao escolheu o ponto agora (ponto_destino_id era null).
+      ...(plano.ponto_destino_id
+        ? {
+          ponto_destino_id: plano.ponto_destino_id,
+          alternativas_ponto: plano.alternativas_ponto ?? [],
+        }
+        : {}),
       versao: rota.versao + 1,
       polyline: plano.polyline,
       origem_calculo: plano.origem_calculo,

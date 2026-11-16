@@ -45,6 +45,42 @@ export class ClienteOsrmHttp implements ClienteOsrm {
       }`,
     );
   }
+
+  /** OSRM `table` (annotations=distance) da origem a cada destino; mesmo timeout/retry/orcamento do trip. */
+  async distancias(
+    origem: Coord,
+    destinos: Coord[],
+    orcamentoMs?: number,
+  ): Promise<number[]> {
+    const base = this.op.baseUrl.replace(/\/+$/, "");
+    const lista = [origem, ...destinos].map((c) => `${c.lng},${c.lat}`).join(
+      ";",
+    );
+    const idx = destinos.map((_, i) => i + 1).join(";");
+    const url =
+      `${base}/table/v1/driving/${lista}?sources=0&destinations=${idx}&annotations=distance`;
+    const f = this.op.fetchFn ?? fetch;
+    const fim = performance.now() + (orcamentoMs ?? Infinity);
+    let ultimo: unknown;
+    for (let i = 0; i < this.op.tentativas; i++) {
+      const restante = fim - performance.now();
+      if (restante < 50) break;
+      try {
+        const resp = await f(url, {
+          signal: AbortSignal.timeout(Math.min(this.op.timeoutMs, restante)),
+        });
+        if (!resp.ok) throw new Error(`osrm_http_${resp.status}`);
+        return interpretarTable(await resp.json(), destinos.length);
+      } catch (e) {
+        ultimo = e;
+      }
+    }
+    throw new Error(
+      `osrm_indisponivel: ${
+        (ultimo as Error)?.message ?? "orcamento_esgotado"
+      }`,
+    );
+  }
 }
 
 /** Valida OSRM_BASE_URL: so http/https, sem credenciais embutidas. */
@@ -91,4 +127,17 @@ export function interpretarTrip(corpo: any, n: number): ResultadoTrip {
     distancia_total_m: Math.round(viagem.distance),
     duracao_total_s: Math.round(viagem.duration),
   };
+}
+
+// deno-lint-ignore no-explicit-any
+export function interpretarTable(corpo: any, n: number): number[] {
+  const linha = corpo?.distances?.[0];
+  if (corpo?.code !== "Ok" || !Array.isArray(linha) || linha.length !== n) {
+    throw new Error(`osrm_table_invalida_${corpo?.code}`);
+  }
+  // null = sem rota entre os pontos: nao pode ser candidato barato; trata como invalido.
+  if (linha.some((d: unknown) => typeof d !== "number" || d < 0)) {
+    throw new Error("osrm_table_sem_rota");
+  }
+  return linha.map((d: number) => Math.round(d));
 }

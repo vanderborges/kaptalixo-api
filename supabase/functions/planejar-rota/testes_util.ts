@@ -15,6 +15,11 @@ export const P0: Coord = { lat: -27.59, lng: -48.55 };
 /** OSRM falso "otimo": forca bruta por haversine (como o trip do OSRM faz para n <= 9). */
 export class OsrmFakeOtimo implements ClienteOsrm {
   chamadas = 0;
+  consultasTable = 0;
+  async distancias(origem: Coord, destinos: Coord[]): Promise<number[]> {
+    this.consultasTable++;
+    return destinos.map((d) => Math.round(haversineM(origem, d) * 1.3));
+  }
   async trip(coords: Coord[], destinoFixo: boolean): Promise<ResultadoTrip> {
     this.chamadas++;
     const n = coords.length;
@@ -61,7 +66,11 @@ export class OsrmFakeOtimo implements ClienteOsrm {
 }
 
 export class OsrmFakeFalha implements ClienteOsrm {
+  consultasTable = 0;
   chamadas = 0;
+  distancias(): Promise<number[]> {
+    return Promise.reject(new Error("osrm_indisponivel"));
+  }
   trip(): Promise<ResultadoTrip> {
     this.chamadas++;
     return Promise.reject(new Error("osrm_indisponivel"));

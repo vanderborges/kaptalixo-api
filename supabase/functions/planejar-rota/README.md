@@ -1,7 +1,8 @@
-# planejar-rota (UC06)
+# planejar-rota (UC06 + UC07)
 
 Edge Function (Deno) que monta a rota otimizada de um catador: le `rotas`,
-`rota_paradas`, a posicao atual do catador e o ponto de descarte; chama o OSRM
+`rota_paradas`, a posicao atual do catador e o ponto de descarte (escolhendo-o
+pelo score da RN06 quando ainda nao existe, UC07); chama o OSRM
 `trip` e grava ordem, ETA, trechos, polyline, `origem_calculo` e `versao`.
 
 ## Como e disparada (decisao)
@@ -47,8 +48,8 @@ polyline: o app le `v_rota_catador` / `rota_paradas`.
 
 1. Coordenadas `[P0, C1..Cn, D]`. P0 = ultima parada `no_local` (travada) ou
    `catadores.localizacao_atual`; sem posicao, parte da primeira parada
-   pendente. D so existe se `rotas.ponto_destino_id` estiver definido (escolha
-   do ponto = T4.3); ate la usa-se `source=first&roundtrip=false` sem
+   pendente. D vem de `rotas.ponto_destino_id` (ou e escolhido agora, ver
+   "Escolha do ponto"); sem D usa-se `source=first&roundtrip=false` sem
    `destination`.
 2. OSRM
    `GET {OSRM_BASE_URL}/trip/v1/driving/...?source=first[&destination=last]&roundtrip=false&geometries=polyline&overview=full`.
@@ -69,6 +70,39 @@ polyline: o app le `v_rota_catador` / `rota_paradas`.
 5. Bloqueio otimista: o `update` de `rotas` exige `versao` igual a lida. Se
    `aceitar_oferta` alterou a rota no meio, a funcao relê e replaneja uma vez
    (senao 409).
+
+## Escolha do ponto de descarte (UC07 / RN06)
+
+Roda dentro do planejamento, so quando `rotas.ponto_destino_id` e nulo, nao ha
+parada de descarte aberta e ha coletas. Se o catador trocou o ponto (ou ja
+havia escolha), `ponto_destino_id` preenchido e **respeitado**: a funcao nunca
+o sobrescreve (decisao: sem coluna que distinga escolha automatica de manual;
+consequencia: o ponto nao e reavaliado quando entram novas coletas, so se o
+catador/app limpar `ponto_destino_id`).
+
+1. Trip previa (sem destino) para achar a **ultima coleta** e seu ETA.
+2. Candidatos: dos pontos `ativo`, os **5 mais proximos** (linha reta) da ultima
+   coleta que estejam **abertos na chegada estimada** (ETA da ultima coleta +
+   distancia / velocidade). `horario_funcionamento` = `{"seg":[["08:00","17:00"]]}`,
+   fuso America/Sao_Paulo, fim exclusivo, dia ausente = fechado, formato invalido =
+   fechado, intervalo com fim <= inicio vai ate a meia-noite.
+3. `km_adicionais` = distancia por estrada da ultima coleta ao ponto (OSRM
+   `table`, `annotations=distance`; mesmo timeout/retry/orcamento do `trip`).
+   Falhou: haversine e `origem_calculo=haversine`.
+4. `valor_estimado = soma(peso x preco_kg)`: o peso de cada solicitacao
+   (`peso_estimado_kg`, senao sacos x `peso_saco_kg[tamanho]`, RN07) e dividido
+   igualmente entre os materiais declarados; material que o ponto nao compra vale
+   0. **Sem materiais declarados: media dos precos do ponto.**
+5. `score = valor_estimado - km_adicionais x custo_km` (`parametros.custo_km_reais`,
+   nunca fixo no codigo). A abertura e reconferida com a distancia final: ponto
+   fechado nunca vence. Desempate: maior valor, menor distancia, id.
+6. Grava em `rotas`: `ponto_destino_id` = 1o; `alternativas_ponto` = 2o e 3o
+   (`[{ponto_id, score}]`, score com 2 casas); e insere a parada de descarte
+   (ultima da ordem). Nenhum ponto aberto: sem descarte (nada e gravado; o app
+   pode pedir novo planejamento depois / trocar manualmente).
+
+Lembrete: `service_role` precisa de update em `rotas.ponto_destino_id` e
+`alternativas_ponto` (P-014).
 
 ## Seguranca
 
