@@ -1,9 +1,11 @@
 -- T1.3: contagens do seed de demonstracao e ordenacao por distancia.
 begin;
-select plan(17);
+select plan(19);
 
 select is((select count(*)::int from materiais), 7, '7 materiais');
 select is((select count(*)::int from pontos_coleta), 4, '4 pontos de coleta');
+select is((select logradouro || '|' || bairro || '|' || round(st_y(localizacao::geometry)::numeric, 4) || '|' || round(st_x(localizacao::geometry)::numeric, 4) from pontos_coleta where id = 'f0000000-0000-4000-8000-000000000001'), 'Rua Seringueira|Cidade das Flores|-23.5402|-46.8075', 'ponto 1 = ponto demo (CEP 06184-210)');
+select ok((select bool_and(public._ponto_aberto(p.horario_funcionamento, t)) from pontos_coleta p, unnest(array['2026-11-16 03:00:00-03','2026-11-21 23:59:00-03','2026-11-22 12:00:00-03']::timestamptz[]) t where p.id = 'f0000000-0000-4000-8000-000000000001'), 'ponto 1 aberto 24 h em qualquer dia');
 select is((select count(*)::int from ponto_precos), 28, '28 precos (4 pontos x 7 materiais)');
 select is((select count(distinct preco_kg)::int from ponto_precos where material_id = 6), 4, 'aluminio com preco diferente em cada ponto');
 

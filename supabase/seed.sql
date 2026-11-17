@@ -119,14 +119,15 @@ from (values
 ) k(n, tipo, doc, razao, status, veiculo, cap, sit, dx, dy);
 
 -- ============ PONTOS DE COLETA (4) + precos + horarios ============
+-- Ponto 1 = ponto demo (CEP 06184-210, coordenadas Nominatim), aberto 24 h todos os dias.
 -- Ponto 4 fecha as 18h (fechado a noite); os demais tem horarios diferentes.
 insert into pontos_coleta (id, perfil_id, nome, logradouro, numero, bairro, cidade, uf, telefone, localizacao, horario_funcionamento)
 select pg_temp.uid('f0000000', p.n), pg_temp.uid('b0000000', p.n), p.nome, p.rua, p.num, p.bairro,
-       c.cidade, c.uf, '1130000' || p.n, pg_temp.pt(p.dx, p.dy), p.horario::jsonb
+       c.cidade, c.uf, '1130000' || p.n, case when p.n = 1 then st_setsrid(st_makepoint(-46.8074796, -23.5402487), 4326)::geography else pg_temp.pt(p.dx, p.dy) end, p.horario::jsonb
 from seed_cfg c,
      (values
-  (1,'Ferro-Velho Central',  'Rua da Sucata', '10','Centro',     0.0,  -300.0,
-     '{"seg":[["07:00","22:00"]],"ter":[["07:00","22:00"]],"qua":[["07:00","22:00"]],"qui":[["07:00","22:00"]],"sex":[["07:00","22:00"]],"sab":[["07:00","20:00"]]}'),
+  (1,'Ferro-Velho Central',  'Rua Seringueira','S/N','Cidade das Flores', 0.0, 0.0,
+     '{"seg":[["00:00","24:00"]],"ter":[["00:00","24:00"]],"qua":[["00:00","24:00"]],"qui":[["00:00","24:00"]],"sex":[["00:00","24:00"]],"sab":[["00:00","24:00"]],"dom":[["00:00","24:00"]]}'),
   (2,'Cooperativa Recicla+', 'Av. Cooperativa','500','Jardim Sul', 1800.0, -1200.0,
      '{"seg":[["08:00","17:00"]],"ter":[["08:00","17:00"]],"qua":[["08:00","17:00"]],"qui":[["08:00","17:00"]],"sex":[["08:00","17:00"]]}'),
   (3,'Deposito Vila Norte',  'Rua do Deposito','88','Vila Norte', 400.0, 2600.0,
