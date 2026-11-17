@@ -157,3 +157,11 @@ on conflict (chave) do update set valor = 'true'::jsonb;
 insert into demo_estado_catadores (catador_id, situacao, localizacao_atual, localizacao_atualizada_em)
 select perfil_id, situacao, localizacao_atual, localizacao_atualizada_em from catadores
 on conflict (catador_id) do nothing;
+
+-- ============ ATORES FICTICIOS (T1.6) ============
+-- Geradores e catadores do seed: alvos validos de demo_criar_pedido / demo_mover_catador.
+insert into demo_atores (perfil_id, origem)
+select perfil_id, 'seed' from geradores
+union all
+select perfil_id, 'seed' from catadores
+on conflict (perfil_id) do nothing;
