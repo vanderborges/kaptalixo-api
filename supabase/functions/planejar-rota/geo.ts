@@ -34,7 +34,35 @@ export function codificarPolyline(pontos: Coord[]): string {
   return saida;
 }
 
-/** Interpreta geography vinda do PostgREST (GeoJSON) ou texto WKT/EWKT. */
+/**
+ * Ponto em EWKB hexadecimal (o que o PostgREST devolve para colunas
+ * geography/geometry). Aceita endianness 00/01 e SRID opcional.
+ */
+export function lerEwkbHex(texto: string): Coord | null {
+  const h = texto.trim();
+  if (h.length < 42 || h.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(h)) {
+    return null;
+  }
+  const bytes = new Uint8Array(h.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  }
+  const dv = new DataView(bytes.buffer);
+  const little = bytes[0] === 1;
+  if (bytes[0] !== 0 && bytes[0] !== 1) return null;
+  const tipo = dv.getUint32(1, little);
+  const temSrid = (tipo & 0x20000000) !== 0;
+  const base = tipo & 0x0fffffff;
+  if (base !== 1) return null; // so Point
+  const off = 5 + (temSrid ? 4 : 0);
+  if (bytes.length < off + 16) return null;
+  const lng = dv.getFloat64(off, little);
+  const lat = dv.getFloat64(off + 8, little);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  return { lng, lat };
+}
+
+/** Interpreta geography vinda do PostgREST (GeoJSON, EWKB hex) ou texto WKT/EWKT. */
 export function lerPonto(v: unknown): Coord | null {
   if (v == null) return null;
   if (typeof v === "object") {
@@ -45,6 +73,8 @@ export function lerPonto(v: unknown): Coord | null {
     return null;
   }
   if (typeof v === "string") {
+    const hex = lerEwkbHex(v);
+    if (hex) return hex;
     const m = v.match(/POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i);
     if (m) return { lng: Number(m[1]), lat: Number(m[2]) };
   }
