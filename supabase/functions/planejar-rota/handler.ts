@@ -13,10 +13,20 @@ export interface DepsHandler extends OpcoesPlanejador {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// CORS: o app web (Flutter no navegador) chama a funcao de outra origem.
+// A autorizacao continua sendo o Bearer; nao ha cookies.
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers":
+    "authorization, x-client-info, apikey, content-type",
+  "access-control-allow-methods": "POST, OPTIONS",
+  "access-control-max-age": "600",
+};
+
 function json(corpo: unknown, status = 200): Response {
   return new Response(JSON.stringify(corpo), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8" },
+    headers: { "content-type": "application/json; charset=utf-8", ...CORS },
   });
 }
 
@@ -27,6 +37,9 @@ export function criarHandler(
   return async (req) => {
     const prazo = performance.now() + (deps.orcamentoMs ?? 2500);
     try {
+      if (req.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: CORS });
+      }
       if (req.method !== "POST") {
         return json({ erro: "metodo_nao_permitido" }, 405);
       }

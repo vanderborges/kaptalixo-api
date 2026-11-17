@@ -5,9 +5,9 @@ set search_path = public, extensions;
 
 -- ============ CONSTANTES (troque aqui para mudar de cidade) ============
 create temp table seed_cfg as
-select -23.5505::float8 as lat,        -- CIDADE_DEMO_LAT
-       -46.6333::float8 as lng,        -- CIDADE_DEMO_LNG
-       'Sao Paulo'::text as cidade,
+select -23.5182533::float8 as lat,        -- CIDADE_DEMO_LAT
+       -46.7556988::float8 as lng,        -- CIDADE_DEMO_LNG
+       'Osasco'::text as cidade,
        'SP'::char(2)     as uf,
        'Kaptalixo#Dev1'::text as senha_dev;
 
